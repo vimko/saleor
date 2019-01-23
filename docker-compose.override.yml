@@ -1,0 +1,27 @@
+version: '2'
+
+services:
+  web:
+    ports:
+      - 8000:8000
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app:Z
+
+  db:
+    ports:
+      - 5432:5432
+
+  redis:
+    ports:
+      - 6379:6379
+
+  celery:
+    volumes:
+      - .:/app:Z
+
+volumes:
+  saleor-db:
+    driver: local
+  saleor-redis:
+    driver: local
