@@ -31,6 +31,12 @@ class AddressInput(graphene.InputObjectType):
 class Address(CountableDjangoObjectType):
     country = graphene.Field(
         CountryDisplay, required=True, description='Default shop\'s country')
+    is_default_shipping_address = graphene.Boolean(
+        required=False,
+        description='Address is user\'s default shipping address')
+    is_default_billing_address = graphene.Boolean(
+        required=False,
+        description='Address is user\'s default billing address')
 
     class Meta:
         exclude_fields = ['user_set', 'user_addresses']
@@ -41,6 +47,38 @@ class Address(CountableDjangoObjectType):
     def resolve_country(self, info):
         return CountryDisplay(
             code=self.country.code, country=self.country.name)
+
+    def resolve_is_default_shipping_address(self, info):
+        """
+        This field is added through annotation when using the
+        `resolve_addresses` resolver. It's invalid for
+        `resolve_default_shipping_address` and
+        `resolve_default_billing_address`
+        """
+        if not hasattr(self, 'user_default_shipping_address_pk'):
+            return None
+
+        user_default_shipping_address_pk = getattr(
+            self, 'user_default_shipping_address_pk')
+        if user_default_shipping_address_pk == self.pk:
+            return True
+        return False
+
+    def resolve_is_default_billing_address(self, info):
+        """
+        This field is added through annotation when using the
+        `resolve_addresses` resolver. It's invalid for
+        `resolve_default_shipping_address` and
+        `resolve_default_billing_address`
+        """
+        if not hasattr(self, 'user_default_billing_address_pk'):
+            return None
+
+        user_default_billing_address_pk = getattr(
+            self, 'user_default_billing_address_pk')
+        if user_default_billing_address_pk == self.pk:
+            return True
+        return False
 
 
 class User(CountableDjangoObjectType):
@@ -67,7 +105,7 @@ class User(CountableDjangoObjectType):
         model = get_user_model()
 
     def resolve_addresses(self, info, **kwargs):
-        return self.addresses.all()
+        return self.addresses.annotate_default(self).all()
 
     def resolve_checkout(self, info, **kwargs):
         return get_user_cart(self)
@@ -113,6 +151,8 @@ class AddressValidationData(graphene.ObjectType):
     country_area_type = graphene.String()
     country_area_choices = graphene.List(ChoiceValue)
     city_type = graphene.String()
+    city_choices = graphene.List(ChoiceValue)
+    city_area_type = graphene.String()
     city_area_choices = graphene.List(ChoiceValue)
     postal_code_type = graphene.String()
     postal_code_matchers = graphene.List(graphene.String)

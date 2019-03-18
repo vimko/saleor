@@ -5,10 +5,10 @@ from ....account.models import User
 from ....core.utils.taxes import ZERO_TAXED_MONEY
 from ....order import OrderEvents, models
 from ....order.utils import cancel_order
-from ....payment import ChargeStatus, CustomPaymentChoices, PaymentError
-from ....payment.models import Payment
+from ....payment import CustomPaymentChoices, PaymentError
 from ....payment.utils import (
-    gateway_capture, gateway_refund, gateway_void, get_billing_data)
+    clean_mark_order_as_paid, gateway_capture, gateway_refund, gateway_void,
+    mark_order_as_paid)
 from ....shipping.models import ShippingMethod as ShippingMethodModel
 from ...account.types import AddressInput
 from ...core.mutations import BaseMutation
@@ -50,16 +50,6 @@ def clean_order_cancel(order, errors):
             Error(
                 field='order',
                 message='This order can\'t be canceled.'))
-    return errors
-
-
-def clean_order_mark_as_paid(order, errors):
-    if order and order.payments.exists():
-        errors.append(
-            Error(
-                field='payment',
-                message='Orders with payments can not be manually '
-                        'marked as paid.'))
     return errors
 
 
@@ -253,7 +243,6 @@ class OrderCancel(BaseMutation):
         else:
             order.events.create(
                 type=OrderEvents.CANCELED.value, user=info.context.user)
-        # FIXME all payments should be voided/refunded at this point
         return OrderCancel(order=order)
 
 
@@ -272,22 +261,14 @@ class OrderMarkAsPaid(BaseMutation):
     def mutate(cls, root, info, id):
         errors = []
         order = cls.get_node_or_error(info, id, errors, 'id', Order)
-        clean_order_mark_as_paid(order, errors)
+        if order is not None:
+            try:
+                clean_mark_order_as_paid(order)
+            except PaymentError as e:
+                errors.append(Error(field='payment', message=str(e)))
         if errors:
             return OrderMarkAsPaid(errors=errors)
-        defaults = {
-            'total': order.total.gross.amount,
-            'captured_amount': order.total.gross.amount,
-            'currency': order.total.gross.currency,
-            **get_billing_data(order)}
-        Payment.objects.get_or_create(
-            gateway=CustomPaymentChoices.MANUAL,
-            charge_status=ChargeStatus.CHARGED, order=order,
-            defaults=defaults)
-
-        order.events.create(
-            type=OrderEvents.ORDER_MARKED_AS_PAID.value,
-            user=info.context.user)
+        mark_order_as_paid(order, info.context.user)
         return OrderMarkAsPaid(order=order)
 
 
@@ -308,11 +289,11 @@ class OrderCapture(BaseMutation):
     def mutate(cls, root, info, id, amount):
         errors = []
         if amount <= 0:
-            cls.add_error('Amount should be a positive number.')
+            cls.add_error(
+                errors, 'amount', 'Amount should be a positive number.')
             return OrderCapture(errors=errors)
 
         order = cls.get_node_or_error(info, id, errors, 'id', Order)
-        # FIXME adjust to multiple payments in the future
         payment = order.get_last_payment()
         clean_order_capture(payment, amount, errors)
 
@@ -375,7 +356,8 @@ class OrderRefund(BaseMutation):
     def mutate(cls, root, info, id, amount):
         errors = []
         if amount <= 0:
-            cls.add_error('Amount should be a positive number.')
+            cls.add_error(
+                errors, 'amount', 'Amount should be a positive number.')
             return OrderRefund(errors=errors)
 
         order = cls.get_node_or_error(info, id, errors, 'id', Order)

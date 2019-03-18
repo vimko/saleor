@@ -104,11 +104,11 @@ export const productUpdateMutation = gql`
   mutation ProductUpdate(
     $id: ID!
     $attributes: [AttributeValueInput]
-    $availableOn: Date
+    $publicationDate: Date
     $category: ID
     $chargeTaxes: Boolean!
     $collections: [ID]
-    $description: String
+    $descriptionJson: JSONString
     $isPublished: Boolean!
     $name: String
     $price: Decimal
@@ -117,11 +117,11 @@ export const productUpdateMutation = gql`
       id: $id
       input: {
         attributes: $attributes
-        availableOn: $availableOn
+        publicationDate: $publicationDate
         category: $category
         chargeTaxes: $chargeTaxes
         collections: $collections
-        description: $description
+        descriptionJson: $descriptionJson
         isPublished: $isPublished
         name: $name
         price: $price
@@ -148,11 +148,11 @@ export const simpleProductUpdateMutation = gql`
   mutation SimpleProductUpdate(
     $id: ID!
     $attributes: [AttributeValueInput]
-    $availableOn: Date
+    $publicationDate: Date
     $category: ID
     $chargeTaxes: Boolean!
     $collections: [ID]
-    $description: String
+    $descriptionJson: JSONString
     $isPublished: Boolean!
     $name: String
     $price: Decimal
@@ -163,11 +163,11 @@ export const simpleProductUpdateMutation = gql`
       id: $id
       input: {
         attributes: $attributes
-        availableOn: $availableOn
+        publicationDate: $publicationDate
         category: $category
         chargeTaxes: $chargeTaxes
         collections: $collections
-        description: $description
+        descriptionJson: $descriptionJson
         isPublished: $isPublished
         name: $name
         price: $price
@@ -201,28 +201,32 @@ export const productCreateMutation = gql`
   ${fragmentProduct}
   mutation ProductCreate(
     $attributes: [AttributeValueInput]
-    $availableOn: Date
+    $publicationDate: Date
     $category: ID!
     $chargeTaxes: Boolean!
     $collections: [ID]
-    $description: String
+    $descriptionJson: JSONString
     $isPublished: Boolean!
     $name: String!
     $price: Decimal
     $productType: ID!
+    $sku: String
+    $stockQuantity: Int
   ) {
     productCreate(
       input: {
         attributes: $attributes
-        availableOn: $availableOn
+        publicationDate: $publicationDate
         category: $category
         chargeTaxes: $chargeTaxes
         collections: $collections
-        description: $description
+        descriptionJson: $descriptionJson
         isPublished: $isPublished
         name: $name
         price: $price
         productType: $productType
+        sku: $sku
+        quantity: $stockQuantity
       }
     ) {
       errors {

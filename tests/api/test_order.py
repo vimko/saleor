@@ -5,11 +5,10 @@ import pytest
 
 from saleor.core.utils.taxes import ZERO_TAXED_MONEY
 from saleor.graphql.core.enums import ReportingPeriod
+from saleor.graphql.order.enums import OrderEventsEmailsEnum, OrderStatusFilter
 from saleor.graphql.order.mutations.orders import (
-    clean_order_cancel, clean_order_capture, clean_order_mark_as_paid,
-    clean_refund_payment, clean_void_payment)
-from saleor.graphql.order.enums import (
-    OrderEventsEmailsEnum, OrderStatusFilter)
+    clean_order_cancel, clean_order_capture, clean_refund_payment,
+    clean_void_payment)
 from saleor.graphql.order.utils import can_finalize_draft_order
 from saleor.graphql.payment.types import PaymentChargeStatusEnum
 from saleor.order import OrderEvents, OrderEventsEmails, OrderStatus
@@ -17,9 +16,8 @@ from saleor.order.models import Order, OrderEvent
 from saleor.payment import ChargeStatus, CustomPaymentChoices
 from saleor.payment.models import Payment
 from saleor.shipping.models import ShippingMethod
-from tests.api.utils import get_graphql_content
 
-from .utils import assert_no_permission
+from .utils import assert_no_permission, get_graphql_content
 
 
 def test_orderline_query(
@@ -31,7 +29,12 @@ def test_orderline_query(
                 edges {
                     node {
                         lines {
-                            thumbnailUrl(size: 540)
+                            thumbnail(size: 540) {
+                                url
+                            }
+                            variant {
+                                id
+                            }
                         }
                     }
                 }
@@ -39,16 +42,15 @@ def test_orderline_query(
         }
     """
     line = order.lines.first()
-    line.variant = None
     line.save()
+
     staff_api_client.user.user_permissions.add(permission_manage_orders)
     response = staff_api_client.post_graphql(query)
     content = get_graphql_content(response)
     order_data = content['data']['orders']['edges'][0]['node']
-    thumbnails = [l['thumbnailUrl'] for l in order_data['lines']]
-    assert len(thumbnails) == 2
-    assert thumbnails[0] is None
-    assert '/static/images/placeholder540x540.png' in thumbnails[1]
+    assert '/static/images/placeholder540x540.png' in order_data['lines'][0]['thumbnail']['url']
+    variant_id = graphene.Node.to_global_id('ProductVariant', line.variant.pk)
+    assert order_data['lines'][0]['variant']['id'] == variant_id
 
 
 def test_order_query(
@@ -407,6 +409,20 @@ def test_can_finalize_draft_order_wrong_shipping(order_with_lines):
 def test_can_finalize_draft_order_no_order_lines(order):
     errors = can_finalize_draft_order(order, [])
     assert errors[0].message == 'Could not create order without any products.'
+
+
+def test_can_finalize_draft_order_non_existing_variant(order_with_lines):
+    order = order_with_lines
+    line = order.lines.first()
+    variant = line.variant
+    variant.delete()
+    line.refresh_from_db()
+    assert line.variant is None
+
+    errors = can_finalize_draft_order(order, [])
+    assert (
+        errors[0].message ==
+        'Could not create orders with non-existing products.')
 
 
 def test_draft_order_complete(
@@ -957,9 +973,9 @@ def test_order_capture(
     content = get_graphql_content(response)
     data = content['data']['orderCapture']['order']
     order.refresh_from_db()
-    assert data['paymentStatus'] == PaymentChargeStatusEnum.CHARGED.name
+    assert data['paymentStatus'] == PaymentChargeStatusEnum.FULLY_CHARGED.name
     payment_status_display = dict(ChargeStatus.CHOICES).get(
-        ChargeStatus.CHARGED)
+        ChargeStatus.FULLY_CHARGED)
     assert data['paymentStatusDisplay'] == payment_status_display
     assert data['isPaid']
     assert data['totalCaptured']['amount'] == float(amount)
@@ -1112,10 +1128,9 @@ def test_clean_order_void_payment():
 
     payment.is_active = True
     error_msg = 'error has happened.'
-    with patch(
-        'saleor.graphql.order.mutations.orders.gateway_void',
-        side_effect=ValueError(error_msg)):
-            errors = clean_void_payment(payment, [])
+    with patch('saleor.graphql.order.mutations.orders.gateway_void',
+               side_effect=ValueError(error_msg)):
+        errors = clean_void_payment(payment, [])
     assert errors[0].field == 'payment'
     assert errors[0].message == error_msg
 
@@ -1135,18 +1150,6 @@ def test_clean_order_capture():
     assert errors[0].field == 'payment'
     assert errors[0].message == (
         'There\'s no payment associated with the order.')
-
-
-def test_clean_order_mark_as_paid(payment_txn_preauth):
-    order = payment_txn_preauth.order
-    errors = clean_order_mark_as_paid(order, [])
-    assert errors[0].field == 'payment'
-    assert errors[0].message == (
-        'Orders with payments can not be manually marked as paid.')
-
-
-def test_clean_order_mark_as_paid_no_payments(order):
-    assert clean_order_mark_as_paid(order, []) == []
 
 
 def test_clean_order_cancel(order):
@@ -1321,3 +1324,19 @@ def test_orders_total(
     assert (
         content['data']['ordersTotal']['gross']['amount'] ==
         order_with_lines.total.gross.amount)
+
+
+def test_order_by_token_query(api_client, order):
+    query = """
+    query OrderByToken($token: String!) {
+        orderByToken(token: $token) {
+            id
+        }
+    }
+    """
+    order_id = graphene.Node.to_global_id('Order', order.id)
+
+    response = api_client.post_graphql(query, {'token': order.token})
+    content = get_graphql_content(response)
+
+    assert content['data']['orderByToken']['id'] == order_id
